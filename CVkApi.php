@@ -189,7 +189,7 @@ class CVkApi extends CComponent {
         }
         return $this->_accessToken;
     }
-    
+
     public function setAccessToken($token) {
         $this->_accessToken = $token;
     }
@@ -341,9 +341,82 @@ class CVkApi extends CComponent {
         }
         return $this->queryApi('photos.getUploadServer', $params, $accessToken);
     }
-    
-     
-    
+
+    /**
+     * Отправка файла на сервер
+     * 
+     * @link https://vk.com/dev/upload_files?f=%D0%97%D0%B0%D0%B3%D1%80%D1%83%D0%B7%D0%BA%D0%B0%20%D1%84%D0%BE%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84%D0%B8%D0%B9%20%D0%B2%20%D0%B0%D0%BB%D1%8C%D0%B1%D0%BE%D0%BC%20%D0%BF%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D1%82%D0%B5%D0%BB%D1%8F
+     * 
+     * @param string $filePath полный путь до файла
+     * @param string $url ссылка для отправки запроса
+     * @param string $fileFieldName имя параметра, содержащего файл
+     * @param array $arrayOtherParams дополнительные параметры формы
+     * 
+     * @return {JSON} После успешного выполнения возвращает следующие данные в формате JSON: {"server": '1', "photos_list": '2,3,4', "album_id": '5', "hash": '12345abcde'}  
+     */
+    public function sendFile($filePath, $url, $fileFieldName = 'file', $arrayOtherParams = array()) {
+        $res = false;
+        $arrayOtherParams[$fileFieldName] = "@" . $filePath;     
+        $ch = curl_init(); 
+        curl_setopt($ch, CURLOPT_URL, $url); 
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1); 
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0); 
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $arrayOtherParams); 
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 300); 
+        $res = curl_exec($ch);
+        curl_close($ch);
+        if ($res) {
+            $res = CJSON::decode($res);
+        }
+
+        return $res;   
+    }
+
+    /**
+     * Сохраняет фотографии после успешной загрузки
+     * 
+     * @param int $albumId идентификатор альбома, в который необходимо сохранить фотографии
+     * @param mixed $groupId идентификатор сообщества, в которое необходимо сохранить фотографии
+     * @param string $server параметр, возвращаемый в результате загрузки фотографий на сервер
+     * @param string $photosList параметр, возвращаемый в результате загрузки фотографий на сервер
+     * @param string $hash параметр, возвращаемый в результате загрузки фотографий на сервер
+     * @param string $caption текст описания фотографии
+     * @param string $description текст описания альбома
+     * @param mixed $latitude географическая широта, заданная в градусах (от -90 до 90); 
+     * @param mixed $longitude географическая долгота, заданная в градусах (от -180 до 180);
+     */
+    public function photoSave($albumId, $groupId, $server, $photosList, $hash, $caption = false, $description = false, $latitude = false, $longitude = false) {
+        $params = array(
+            'album_id' => $albumId,
+            'group_id' => $groupId,
+            'server' => $server,
+            'photos_list' => $photosList,
+            'hash' => $hash
+        );
+
+        if (!empty($caption)) {
+            $params['caption'] = $caption;
+        }
+
+        if (!empty($params['description'])) {
+            $params['description'] = $description;
+        }
+
+        if (!empty($params['latitude'])) {
+            $params['latitude'] = $latitude;
+        }
+        if (!empty($params['longitude'])) {
+            $params['longitude'] = $longitude;
+        }
+
+        return $this->queryApi('photos.save', $params);
+
+    }
+
+
+
     /**
      * Создает пустой альбом для фотографий.
      * 
@@ -362,17 +435,17 @@ class CVkApi extends CComponent {
             'comment_privacy' => $commentPrivacy,
             'privacy' => $privacy
         );
-        
+
         if ($groupId) {
             $params['group_id'] = $groupId;
         }
-        
+
         if (!empty($description)) {
             $params['description'] = $description;
         }
-        
+
         return $this->queryApi('photos.createAlbum', $params, $accessToken);
-        
+
     }
 
     /**
