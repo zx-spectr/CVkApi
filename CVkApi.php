@@ -1,8 +1,9 @@
 <?php
 /**
  * Обёртка для работы с API сайта vkontakte https://vk.com/dev/
- *  
- * @version 0.1
+ * 
+ * @link https://github.com/zx-spectr/CVkApi 
+ * @version 0.2
  * @author Laptev Grigory
  */
 class CVkApi extends CComponent {
@@ -106,13 +107,7 @@ class CVkApi extends CComponent {
      * @var mixed
      */
     private $_apiVersion = '5.21';
-
-    /**
-     * Компонент для отоправки запросов
-     * 
-     * @var sfWebBrowser
-     */
-    private $_webBrowser;
+    
 
     /**
      * Токен для доступа к API
@@ -133,8 +128,19 @@ class CVkApi extends CComponent {
         $this->_appId = $appId;
         $this->_redirectUri = $redirectUri;
         $this->_scope = $scope;
-        $this->_webBrowser = Yii::app()->webBrowser;
-        //$this->_webBrowser->
+    }
+    
+    /**
+     * Инициализация CURL
+     * 
+     */
+    private function __getCurl() {
+        $ch = curl_init(); 
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1); 
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0); 
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 300); 
+        return $ch;
     }
 
     /**
@@ -190,10 +196,20 @@ class CVkApi extends CComponent {
         return $this->_accessToken;
     }
 
+    /**
+     * Установка токена
+     * 
+     * @param string $token
+     */
     public function setAccessToken($token) {
         $this->_accessToken = $token;
     }
-
+    
+    /**
+     * Обработка исключения
+     * 
+     * @param Exception $error
+     */
     private function catchError($error) {
         Yii::log( $this->_webBrowser->getResponseHeaders(), CLogger::LEVEL_ERROR );
         Yii::log( $this->_webBrowser->getResponseText(), CLogger::LEVEL_ERROR );
@@ -204,10 +220,26 @@ class CVkApi extends CComponent {
                 if (Yii::app()->session->get('vk_access_token', false)) {
                     Yii::app()->session->remove('vk_access_token');    
                 }
+                $this->accessToken = null;
                 break;
 
         }
         throw new Exception(self::getErrorText($error['code']), $error['code']);    
+    }
+    
+    /**
+     * Отправка GET запроса через CURL
+     * 
+     * @param string $url Ссылка
+     * @return {JSON}
+     */
+    public function get($url) {
+        $ch = $this->__getCurl();
+        curl_setopt($ch, CURLOPT_URL, $url); 
+        $res = curl_exec($ch);
+        curl_close($ch);
+        $res = CJSON::decode($res);
+        return $res;
     }
 
     /**
@@ -236,14 +268,8 @@ class CVkApi extends CComponent {
         );
 
         $url = $this->__prepareUrlTemplate($this->_apiRequestUrlTemplate, $arrayReplace);
-
-        $this->_webBrowser->get($url);
-        $res = $this->_webBrowser->getResponseText();
-        $res =  json_decode($res, true);
+        $res = $this->get($url);
         if (!empty($res['error'])) {
-            Yii::log( $this->_webBrowser->getResponseHeaders(), CLogger::LEVEL_ERROR );
-            Yii::log( $this->_webBrowser->getResponseText(), CLogger::LEVEL_ERROR );
-
             throw new Exception($res['error']['error_msg'], $res['error']['code']);
         }
         return $res;
@@ -341,6 +367,8 @@ class CVkApi extends CComponent {
         }
         return $this->queryApi('photos.getUploadServer', $params, $accessToken);
     }
+    
+    
 
     /**
      * Отправка файла на сервер
@@ -357,14 +385,10 @@ class CVkApi extends CComponent {
     public function sendFile($filePath, $url, $fileFieldName = 'file', $arrayOtherParams = array()) {
         $res = false;
         $arrayOtherParams[$fileFieldName] = "@" . $filePath;     
-        $ch = curl_init(); 
+        $ch = $this->__getCurl();
         curl_setopt($ch, CURLOPT_URL, $url); 
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1); 
         curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0); 
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $arrayOtherParams); 
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 300); 
         $res = curl_exec($ch);
         curl_close($ch);
         if ($res) {
@@ -372,6 +396,35 @@ class CVkApi extends CComponent {
         }
 
         return $res;   
+    }
+    
+    /**
+     * Получить содержимое файла по ссылке
+     * 
+     * @param string $url Ссылка
+     */
+    public function getFileContent($url) {
+        $ch = $this->__getCurl();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        $data = curl_exec($ch);
+        curl_close($ch);
+        return $data;
+    }
+    
+    /**
+     * Сохранить содержимое файла по ссылке на диск
+     * 
+     * @param string $url Ссылка
+     * @param string $filePath Имя файла для сохранения
+     */
+    public function getFileContentToFilePath($url, $filePath) {
+        $ch = $this->__getCurl();
+        $fp = fopen ($filePath, 'w');
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_FILE, $fp);
+        curl_exec($ch);
+        curl_close($ch);
+        fclose($fp);
     }
 
     /**
