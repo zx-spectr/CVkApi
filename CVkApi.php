@@ -25,6 +25,8 @@ class CVkApi extends CComponent {
         '9' => 'Слишком много однотипных действий',
         '10' => 'Произошла внутренняя ошибка сервера',
         '11' => 'В тестовом режиме приложение должно быть выключено или пользователь должен быть залогинен',
+        '12' => 'Невозможно скомпилировать код.',
+        '13' => 'Ошибка выполнения кода',
         '14' => 'Требуется ввод кода с картинки (Captcha)',
         '15' => 'Доступ запрещён',
         '16' => 'Требуется выполнение запросов по протоколу HTTPS, т.к. пользователь включил настройку, требующую работу через безопасное соединение',
@@ -40,6 +42,8 @@ class CVkApi extends CComponent {
         '200' => 'Доступ к альбому запрещён',
         '201' => 'Доступ к аудио запрещён',
         '203' => 'Доступ к группе запрещён',
+        '214' => 'Нет доступа к размещению записей. ',
+        '219' => 'Рекламный пост уже недавно публиковался. ',
         '300' => 'Альбом переполнен',
         '500' => 'Действие запрещено. Вы должны включить переводы голосов в настройках приложения',
         '600' => 'Нет прав на выполнение данных операций с рекламным кабинетом',
@@ -77,7 +81,8 @@ class CVkApi extends CComponent {
      * 
      * @var string
      */
-    private $_apiRequestUrlTemplate = 'https://api.vk.com/method/METHOD_NAME?PARAMETERS&access_token=ACCESS_TOKEN';
+    private $_apiRequestUrlTemplate = 'https://api.vk.com/method/METHOD_NAME?PARAMETERS&access_token=ACCESS_TOKEN&v=API_VERSION';
+    private $_apiRequestUrlTemplatePost = 'https://api.vk.com/method/METHOD_NAME?access_token=ACCESS_TOKEN&v=API_VERSION';
 
     /**
      * Адрес, на который будет передан code. Этот адрес должен находиться в пределах домена, указанного в настройках приложения. 
@@ -106,7 +111,7 @@ class CVkApi extends CComponent {
      * 
      * @var mixed
      */
-    private $_apiVersion = '5.21';
+    private $_apiVersion = '5.23';
     
 
     /**
@@ -148,6 +153,8 @@ class CVkApi extends CComponent {
      * 
      * @param mixed $urlTemplate
      * @param mixed $arrayReplace
+     *
+     * @return string
      */
     private function __prepareUrlTemplate($urlTemplate, $arrayReplace) {
         return str_replace(array_keys($arrayReplace), array_values($arrayReplace), $urlTemplate);
@@ -211,9 +218,6 @@ class CVkApi extends CComponent {
      * @param Exception $error
      */
     private function catchError($error) {
-        Yii::log( $this->_webBrowser->getResponseHeaders(), CLogger::LEVEL_ERROR );
-        Yii::log( $this->_webBrowser->getResponseText(), CLogger::LEVEL_ERROR );
-
         switch ($error['code']) {
             case '4':
             case '5':
@@ -239,7 +243,25 @@ class CVkApi extends CComponent {
         $res = curl_exec($ch);
         curl_close($ch);
         $res = CJSON::decode($res);
-        return $res;
+        return $res;  
+    }
+    
+    /**
+     * Отправка запроса методом POST
+     * 
+     * @param mixed $url Ссылка
+     * @param mixed $postParams Массив параметров
+     * @return {stdClass|stdClass[]}
+     */
+    public function post($url, $postParams) {
+        $ch = $this->__getCurl();
+        curl_setopt($ch, CURLOPT_URL, $url); 
+        curl_setopt($ch, CURLOPT_POST, true); 
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $postParams); 
+        $res = curl_exec($ch);
+        curl_close($ch);
+        $res = CJSON::decode($res);
+        return $res;  
     }
 
     /**
@@ -248,6 +270,9 @@ class CVkApi extends CComponent {
      * @param string $methodName Название метода из списка функций API
      * @param array $arrayParameters Параметры соответствующего метода API
      * @param string $accessToken Ключ доступа, полученный в результате успешной авторизации приложения
+     *
+     * @return {JSON}
+     * @throws Exception
      */
     public function queryApi($methodName, $arrayParameters, $accessToken = false) {
         if (empty($accessToken)) {
@@ -256,7 +281,7 @@ class CVkApi extends CComponent {
         $parameters = array();
         if (count($arrayParameters) > 0) {
             foreach ($arrayParameters as $key=>$val) {
-                $parameters[] = $key . '=' . $val;
+                $parameters[] = $key . '=' . urlencode($val);
             }
             $parameters = implode('&', $parameters); 
         }
@@ -264,7 +289,8 @@ class CVkApi extends CComponent {
         $arrayReplace = array(
             'PARAMETERS' => $parameters,
             'METHOD_NAME' => $methodName,
-            'ACCESS_TOKEN' => $accessToken
+            'ACCESS_TOKEN' => $accessToken,
+            'API_VERSION' => $this->_apiVersion
         );
 
         $url = $this->__prepareUrlTemplate($this->_apiRequestUrlTemplate, $arrayReplace);
@@ -274,6 +300,41 @@ class CVkApi extends CComponent {
         }
         return $res;
     }
+    
+    /**
+     * Отправка запроса к API через POST
+     * 
+     * @param string $methodName Название метода
+     * @param array $arrayParameters Параметры
+     * @param string $accessToken Токен
+     * @return {JSON}
+     */
+    public function queryApiPost($methodName, $arrayParameters, $accessToken = false) {
+        if (empty($accessToken)) {
+            $accessToken = $this->_accessToken;
+        }
+        $parameters = array();
+        if (count($arrayParameters) > 0) {
+            foreach ($arrayParameters as $key=>$val) {
+                $parameters[] = $key . '=' . urlencode($val);
+            }
+            $parameters = implode('&', $parameters); 
+        }
+
+        $arrayReplace = array(
+            'METHOD_NAME' => $methodName,
+            'ACCESS_TOKEN' => $accessToken,
+            'API_VERSION' => $this->_apiVersion
+        );
+
+        $url = $this->__prepareUrlTemplate($this->_apiRequestUrlTemplatePost, $arrayReplace); 
+        $res = $this->post($url, $parameters);
+        if (!empty($res['error'])) {
+            throw new Exception($res['error']['error_msg'], $res['error']['code']);
+        }
+        return $res;   
+    }
+    
 
     /**
      * Возвращает расширенную информацию о пользователях.
@@ -285,9 +346,15 @@ class CVkApi extends CComponent {
      * @param mixed $fields список дополнительных полей, которые необходимо вернуть.
      * @param mixed $accessToken
      */
-    public function usersGet($uids = '', $fields, $accessToken) {
+    public function usersGet($uids = '', $fields, $accessToken = false) {
+        if ($fields == '*') {
+            $fields = 'sex, bdate, city, country, photo_50, photo_100, photo_200_orig, photo_200, photo_400_orig, photo_max, photo_max_orig, online, online_mobile, domain, has_mobile, contacts, connections, site, education, universities, schools, can_post, can_see_all_posts, can_see_audio, can_write_private_message, status, last_seen, common_count, relation, relatives, counters, screen_name, maiden_name, timezone, occupation';
+        }
+        
         if (is_array($fields)) {
             $fields = implode(',', $fields);
+        } else {
+            $fields = str_replace(' ', '', $fields);
         }
 
         $uids = explode(',', $uids);
@@ -333,11 +400,9 @@ class CVkApi extends CComponent {
         $photos = implode(',', $photos);
 
         $params['photos'] = $photos;
-
         if ($extended) {
             $params['extended'] = 1;
         }
-
         if ($photoSizes) {
             $params['photo_sizes'] = 1;    
         }
@@ -367,15 +432,13 @@ class CVkApi extends CComponent {
         }
         return $this->queryApi('photos.getUploadServer', $params, $accessToken);
     }
-    
-    
 
     /**
      * Отправка файла на сервер
      * 
      * @link https://vk.com/dev/upload_files?f=%D0%97%D0%B0%D0%B3%D1%80%D1%83%D0%B7%D0%BA%D0%B0%20%D1%84%D0%BE%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84%D0%B8%D0%B9%20%D0%B2%20%D0%B0%D0%BB%D1%8C%D0%B1%D0%BE%D0%BC%20%D0%BF%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D1%82%D0%B5%D0%BB%D1%8F
      * 
-     * @param string $filePath полный путь до файла
+     * @param string|array $filePath полный путь до файла, либо массив путей
      * @param string $url ссылка для отправки запроса
      * @param string $fileFieldName имя параметра, содержащего файл
      * @param array $arrayOtherParams дополнительные параметры формы
@@ -384,7 +447,16 @@ class CVkApi extends CComponent {
      */
     public function sendFile($filePath, $url, $fileFieldName = 'file', $arrayOtherParams = array()) {
         $res = false;
-        $arrayOtherParams[$fileFieldName] = "@" . $filePath;     
+        if (is_array($filePath)) {
+            $ch = 0;
+            foreach ($filePath as $file) {
+                $ch++;
+                $arrayOtherParams[$fileFieldName . $ch] = "@" . $file;
+            }
+        } else {
+            $arrayOtherParams[$fileFieldName] = "@" . $filePath;         
+        }
+        
         $ch = $this->__getCurl();
         curl_setopt($ch, CURLOPT_URL, $url); 
         curl_setopt($ch, CURLOPT_POST, 1);
@@ -465,7 +537,6 @@ class CVkApi extends CComponent {
         }
 
         return $this->queryApi('photos.save', $params);
-
     }
 
 
@@ -577,10 +648,97 @@ class CVkApi extends CComponent {
         return $this->queryApi('storage.set', $params, $accessToken);   
     }
 
+    /**
+     * Возвращает информацию о городах по их идентификаторам.
+     * 
+     * Идентификаторы (id) могут быть получены с помощью методов users.get, places.getById, places.search, places.getCheckins.
+     * Это открытый метод, не требующий access_token.  
+     * 
+     * @link https://vk.com/dev/database.getCitiesById
+     * @param array $cityIds идентификаторы городов
+     * @return {JSON}
+     */
+    public function databaseGetCitiesById($cityIds) {
+        if (!is_array($cityIds)) {
+            $cityIds = array($cityIds);
+        }
+        
+        $params = array(
+            'city_ids' => implode(',', $cityIds)
+        );
+        return $this->queryApi('database.getCitiesById', $params);
+    }
 
-
-
-
+    /**
+     * Получить код пола по его ID
+     * 
+     * @param int $id
+     * @return string
+     */
+    public function getSexCode($id) {
+        $res = 0;
+        if ($id == 1) {
+            $res = 'female';
+        } else if ($id == 2) {
+            $res = 'male';
+        }
+        return $res;
+    }
+    
+    /**
+     * Сохраняет текст вики-страницы.
+     * 
+     * Для вызова этого метода Ваше приложение должно иметь права: pages.
+     * 
+     * @link https://vk.com/dev/pages.save
+     * 
+     * @param mixed $text новый текст страницы в вики-формате
+     * @param mixed $pageId идентификатор вики-страницы. Вместо page_id может быть передан параметр title
+     * @param mixed $groupId идентификатор сообщества, которому принадлежит вики-страница
+     * @param mixed $userId идентификатор пользователя, создавшего вики-страницу
+     * @param mixed $title название вики-страницы
+     * @return {JSON}
+     */
+    public function pagesSave($text, $pageId, $groupId, $userId, $title, $accessToken = false) {
+        $params = array(
+            'Text' => $text,
+            'group_id' => $groupId,
+            'user_id' => $userId,
+            'title' => $title
+        );
+        
+        if (!empty($pageId)) {
+            $params['page_id'] = $pageId;
+        }
+        return $this->queryApiPost('pages.save', $params, $accessToken);
+    }
+    
+    
+    /**
+     * Универсальный метод, который позволяет запускать последовательность других методов, сохраняя и фильтруя промежуточные результаты. 
+     * 
+     * @param string $code код алгоритма в VKScript - формате
+     * @param mixed $accessToken
+     */
+    public function execute($code, $accessToken = false) {
+        $params = array(
+            'code' => $code
+        );
+        return $this->queryApiPost('execute', $params, $accessToken);
+    }
+    
+    
+    public function wallPost($ownerId, $message, $arrayAttachments = array(), $friendsOnly = 0, $fromGroup = 0, $accessToken = false) {
+        $arrayAttachments = implode(',', $arrayAttachments);
+        $params = array(
+            'owner_id' => $ownerId,
+            'friends_only' => $friendsOnly,
+            'from_group' => $fromGroup,
+            'message' => $message,
+            'attachments' => $arrayAttachments
+        );
+        return $this->queryApi('wall.post', $params, $accessToken);
+    }
 
 }
 ?>
